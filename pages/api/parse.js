@@ -1,95 +1,73 @@
-// Uses yt-dlp itself to fetch video metadata (title/thumbnail/duration)
-// instead of calling Bilibili's API directly. yt-dlp already handles
-// Bilibili's anti-bot / signing requirements internally — this is the
-// same tool that already works for the actual download, so metadata
-// fetching now uses the same reliable path instead of a separate one
-// that gets blocked.
-
-import { spawn } from 'child_process';
-
-function isBilibiliUrl(value) {
-  try {
-    const u = new URL(value);
-    const host = u.hostname.toLowerCase();
-    return (
-      host === 'b23.tv' ||
-      host === 'www.b23.tv' ||
-      host === 'bilibili.com' ||
-      host === 'www.bilibili.com' ||
-      host.endsWith('.bilibili.com')
-    );
-  } catch {
-    return false;
-  }
-}
-
-function getMetadata(url) {
-  return new Promise((resolve, reject) => {
-    const ytdlp = spawn('yt-dlp', [
-      '--no-warnings',
-      '--no-playlist',
-      '--skip-download',
-      '--dump-single-json',
-      url,
-    ]);
-
-    let stdout = '';
-    let stderr = '';
-
-    ytdlp.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    ytdlp.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    ytdlp.on('error', (err) => {
-      reject(err);
-    });
-
-    ytdlp.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(stderr.slice(0, 500) || 'yt-dlp exited with an error.'));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout));
-      } catch (e) {
-        reject(e);
-      }
-    });
-  });
-}
+import axios from 'axios';
 
 export default async function handler(req, res) {
-  const url = req.method === 'POST' ? req.body?.url : req.query.url;
+  const { url } = req.query;
 
-  if (!url || typeof url !== 'string' || !url.trim()) {
-    return res.status(400).json({ success: false, error: 'Please enter a Bilibili URL.' });
-  }
-
-  const trimmedUrl = url.trim();
-
-  if (!isBilibiliUrl(trimmedUrl)) {
-    return res.status(400).json({ success: false, error: 'Please enter a valid Bilibili or b23.tv URL.' });
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
   }
 
   try {
-    const info = await getMetadata(trimmedUrl);
+    // 1. b23.tv short link ni full bilibili.com URL ki resolve cheyadam
+    let targetUrl = url;
+    if (url.includes('b23.tv')) {
+      const redirectRes = await axios.get(url, {
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      targetUrl = redirectRes.request.res.responseUrl || url;
+    }
+
+    // 2. BV id extract cheyadam
+    const bvidMatch = targetUrl.match(/BV[a-zA-Z0-9]+/);
+    if (!bvidMatch) {
+      return res.status(400).json({ error: 'Could not find BV ID from URL' });
+    }
+    const bvid = bvidMatch[0];
+
+    // 3. Video basic info (cid, title, pic) kosam view API call
+    const viewRes = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.bilibili.com'
+      }
+    });
+
+    if (viewRes.data.code !== 0 || !viewRes.data.data) {
+      return res.status(404).json({ error: 'Video details not found' });
+    }
+
+    const videoData = viewRes.data.data;
+    const cid = videoData.cid;
+    const title = videoData.title;
+    const pic = videoData.pic;
+
+    // 4. MP4 direct download link kosam playurl API (fnval=0 isthae single combined MP4 stream vasthundi)
+    const playRes = await axios.get(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=64&fnval=0&fnver=0&fourk=0`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.bilibili.com'
+      }
+    });
+
+    let downloadUrl = '';
+    if (playRes.data.code === 0 && playRes.data.data?.durl?.length > 0) {
+      downloadUrl = playRes.data.data.durl[0].url;
+    }
 
     return res.status(200).json({
-      success: true,
-      title: info.title || 'Bilibili Video',
-      thumbnail: info.thumbnail || null,
-      duration: info.duration || null,
-      videoUrl: trimmedUrl,
+      title,
+      pic,
+      bvid,
+      downloadUrl,
+      // streaming proxy link
+      streamUrl: `/api/stream-download?url=${encodeURIComponent(downloadUrl)}`
     });
+
   } catch (error) {
-    console.error('[BiliSave] Parse error:', error.message || error);
-    return res.status(200).json({
-      success: false,
-      error: 'Could not fetch video details. The video may be private, deleted, or region-locked.',
-    });
+    console.error('Parse error:', error.message);
+    return res.status(500).json({ error: 'Could not fetch video details. The video may be private, deleted, or region-locked.' });
   }
 }
