@@ -83,6 +83,7 @@ export default async function handler(req, res) {
       title: info.title || 'Bilibili Video',
       thumbnail: info.thumbnail || null,
       duration: info.duration || null,
+      videoUrl: trimmedUrl,
     });
   } catch (error) {
     console.error('[BiliSave] Parse error:', error.message || error);
@@ -91,4 +92,4 @@ export default async function handler(req, res) {
       error: 'Could not fetch video details. The video may be private, deleted, or region-locked.',
     });
   }
-  }
+}
