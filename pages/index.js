@@ -102,54 +102,34 @@ export default function Home({ allPosts }) {
     }
   };
 
-  const handleVideoDownload = async () => {
-    if (!result?.videoUrl) return;
+  const handleVideoDownload = () => {
+  if (!result?.videoUrl || downloadPreparing) return;
 
-    setDownloadPreparing(true);
-    setDownloadProgress(0);
-    setError('');
+  setDownloadPreparing(true);
+  setDownloadProgress(0);
+  setError('');
 
-    try {
-      const downloadUrl = `/api/direct-download?url=${encodeURIComponent(
-        result.videoUrl
-      )}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+  const downloadUrl =
+    `/api/direct-download?url=${encodeURIComponent(
+      result.videoUrl
+    )}&title=${encodeURIComponent(
+      result.title || 'Bilibili Video'
+    )}`;
 
-      const response = await fetch(downloadUrl);
+  const link = document.createElement('a');
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || 'Could not download this video.');
-      }
+  link.href = downloadUrl;
+  link.download = `${result.title || 'Bilibili Video'}.mp4`;
+  link.rel = 'noopener';
 
-      const reader = response.body.getReader();
-      const chunks = [];
-      let loadedBytes = 0;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loadedBytes += value.length;
-        setDownloadProgress(loadedBytes / (1024 * 1024));
-      }
-
-      const blob = new Blob(chunks, { type: 'video/mp4' });
-      const blobUrl = URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = `${result.title || 'Bilibili Video'}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(blobUrl);
-
-      setDownloadPreparing(false);
-    } catch (err) {
-      setError(err.message || 'Something went wrong while downloading.');
-      setDownloadPreparing(false);
-    }
-  };
+  window.setTimeout(() => {
+    setDownloadPreparing(false);
+  }, 2500);
+};
 
   const formatFileSize = (bytes) => {
     if (!bytes || isNaN(bytes)) return '';
