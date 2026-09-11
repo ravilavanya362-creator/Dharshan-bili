@@ -42,7 +42,7 @@ export default async function handler(req, res) {
 
   const format = hd === true
     ? 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b'
-    : 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]';
+    : 'bv*[height<=480][ext=mp4]+ba[ext=m4a]/bv*[height<=480]+ba/b[height<=480]';
 
   const rawTitle = (title || 'video').toString();
   const asciiName = rawTitle.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_').trim() || 'video';
@@ -143,4 +143,3 @@ export default async function handler(req, res) {
     }
   });
 }
-
