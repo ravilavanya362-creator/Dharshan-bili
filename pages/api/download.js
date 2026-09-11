@@ -1,12 +1,4 @@
-// Proven approach: let yt-dlp do the entire download + merge itself
-// (it re-fetches fresh signed CDN URLs at download time and handles all
-// headers/redirects internally). Avoids passing Bilibili's short-lived
-// signed URLs between separate requests.
 import { spawn } from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import crypto from 'crypto';
 
 export const config = {
   api: {
@@ -15,35 +7,26 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  const { url, title } = req.query;
+  const { url } = req.query;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'Invalid or missing url' });
   }
 
-  const id = crypto.randomBytes(6).toString('hex');
-  const outTemplate = path.join(os.tmpdir(), `${id}.%(ext)s`);
-  const finalPath = path.join(os.tmpdir(), `${id}.mp4`);
-
-      const ytdlp = spawn('yt-dlp', [
-    '--no-warnings',
-    '--no-playlist',
-    '--concurrent-fragments', '8',
-    '--buffer-size', '8K',
-    '--retries', '3',
-    '--fragment-retries', '3',
-    '--socket-timeout', '15',
-    
-    // RAM ఓవర్‌లోడ్ అవ్వకుండా కేవలం 720p లేదా అంతకంటే తక్కువ ఉండేలా లిమిట్ చేయడం
-    '-f', 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]',
-    '--merge-output-format', 'mp4',
-
-    '-o', outTemplate,
+  // సర్వర్ మీద ఫైల్ డౌన్‌లోడ్ చేయకుండా కేవలం yt-dlp ద్వారా డైరెక్ట్ మీడియా లింక్ తీసుకుంటాం (Zero Server Load)
+  const ytdlp = spawn('yt-dlp', [
+    '--get-url',
+    '-f', 'best[ext=mp4]/best',
     url,
   ]);
 
-
+  let output = '';
   let stderr = '';
+
+  ytdlp.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+
   ytdlp.stderr.on('data', (chunk) => {
     stderr += chunk.toString();
   });
@@ -51,50 +34,24 @@ export default async function handler(req, res) {
   ytdlp.on('error', (err) => {
     console.error('Failed to start yt-dlp:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to start downloader.' });
+      res.status(500).json({ error: 'Failed to fetch video link.' });
     }
   });
 
   ytdlp.on('close', (code) => {
-    if (code !== 0) {
+    if (code !== 0 || !output.trim()) {
       console.error(stderr);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Download failed.', details: stderr.slice(0, 500) });
+        res.status(500).json({ error: 'Could not fetch video URL.', details: stderr.slice(0, 300) });
       }
       return;
     }
 
-    if (!fs.existsSync(finalPath)) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Downloaded file not found.' });
-      }
-      return;
-    }
+    const videoUrls = output.trim().split('\n');
+    const directUrl = videoUrls[0]; // డైరెక్ట్ వీడియో లింక్
 
-    const rawTitle = (title || 'video').toString();
-    // ASCII fallback filename (older clients) plus RFC 5987-encoded
-    // filename* for browsers that support full Unicode titles.
-    let asciiName = rawTitle.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_').trim();
-    if (!asciiName) asciiName = 'video';
-    const encodedName = encodeURIComponent(rawTitle).replace(/['()]/g, escape).replace(/\*/g, '%2A');
-
-    const stat = fs.statSync(finalPath);
-
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${asciiName}.mp4"; filename*=UTF-8''${encodedName}.mp4`
-    );
-    res.setHeader('Content-Length', stat.size);
-
-    const stream = fs.createReadStream(finalPath);
-    stream.pipe(res);
-    stream.on('close', () => {
-      fs.unlink(finalPath, () => {});
-    });
-    stream.on('error', (err) => {
-      console.error(err);
-      fs.unlink(finalPath, () => {});
-    });
+    // క్లయింట్‌కి డైరెక్ట్ లింక్ పంపిస్తాం, సర్వర్ క్రాష్ అవ్వదు
+    return res.status(200).json({ downloadUrl: directUrl });
   });
 }
+
