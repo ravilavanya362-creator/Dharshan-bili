@@ -25,34 +25,23 @@ export default async function handler(req, res) {
   const outTemplate = path.join(os.tmpdir(), `${id}.%(ext)s`);
   const finalPath = path.join(os.tmpdir(), `${id}.mp4`);
 
-  const ytdlp = spawn('yt-dlp', [
-  '--no-warnings',
-  '--no-playlist',
+    const ytdlp = spawn('yt-dlp', [
+    '--no-warnings',
+    '--no-playlist',
+    '--concurrent-fragments', '16',
+    '--buffer-size', '16K',
+    '--retries', '3',
+    '--fragment-retries', '3',
+    '--socket-timeout', '15',
+    
+    // ఇక్కడ ఫార్మాట్ కచ్చితంగా వీడియో + ఆడియో కలిపి mp4 లోకి మర్జ్ అయ్యేలా సెట్ చేయాలి
+    '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    '--merge-output-format', 'mp4',
 
-  // FAST DOWNLOAD
-  '--concurrent-fragments', '16',
+    '-o', outTemplate,
+    url,
+  ]);
 
-  // Faster network buffering
-  '--buffer-size', '16K',
-
-  // Retry only when actually needed
-  '--retries', '3',
-  '--fragment-retries', '3',
-
-  // Prevent stuck connections
-  '--socket-timeout', '15',
-
-  // MP4-compatible formats
-  '-f',
-  req.body.hd === true
-    ? 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b'
-    : 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]',
-
-  '--merge-output-format', 'mp4',
-
-  '-o', outTemplate,
-  url,
-]);
   let stderr = '';
   ytdlp.stderr.on('data', (chunk) => {
     stderr += chunk.toString();
