@@ -1,130 +1,139 @@
-// True single-click streaming download: fetches fresh signed CDN URLs via
-// yt-dlp right here (not reused from an earlier request, which caused 403s
-// before), then pipes ffmpeg's output directly to the browser as it's
-// produced - no waiting for the whole file, no separate job/poll step.
-// Uses fragmented-mp4 flags so ffmpeg can write to a non-seekable stream
-// (stdout -> HTTP response) instead of needing to seek back to write the
-// moov atom at the end, which a normal mp4 mux requires.
-import { spawn, execFile } from 'child_process';
-import { promisify } from 'util';
+// Streams yt-dlp's output directly to the HTTP response.
+// The merged video is never written to disk as a persisted file —
+// bytes flow: yt-dlp -> stdout -> this response -> user's browser.
+// This is what actually prevents the server storage from filling up.
 
-const execFileAsync = promisify(execFile);
+import { spawn } from 'child_process';
 
 export const config = {
   api: { responseLimit: false },
 };
 
-function getHeaders(format) {
-  const raw = format?.http_headers || {};
-  const allowed = {};
-  for (const [key, value] of Object.entries(raw)) {
-    const lower = key.toLowerCase();
-    if (lower === 'user-agent' || lower === 'referer' || lower === 'origin' || lower === 'cookie') {
-      allowed[key] = String(value);
-    }
+function isBilibiliUrl(value) {
+  try {
+    const u = new URL(value);
+    const host = u.hostname.toLowerCase();
+    return (
+      host === 'b23.tv' ||
+      host === 'www.b23.tv' ||
+      host === 'bilibili.com' ||
+      host === 'www.bilibili.com' ||
+      host.endsWith('.bilibili.com')
+    );
+  } catch {
+    return false;
   }
-  if (!allowed['User-Agent']) allowed['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36';
-  if (!allowed['Referer']) allowed['Referer'] = 'https://www.bilibili.com/';
-  if (!allowed['Origin']) allowed['Origin'] = 'https://www.bilibili.com';
-  return allowed;
-}
-
-function headersToFFmpeg(headers) {
-  return Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n';
 }
 
 export default async function handler(req, res) {
-  const { url, title } = req.query;
-  if (!url || typeof url !== 'string') {
-    return res.status(400).json({ error: 'Invalid or missing url' });
+  const url = req.method === 'POST' ? req.body?.url : req.query.url;
+  const title = req.method === 'POST' ? req.body?.title : req.query.title;
+  const hd = req.method === 'POST' ? req.body?.hd : req.query.hd === 'true';
+
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: 'Please provide a Bilibili URL.' });
   }
 
-  let info;
-  try {
-    const { stdout } = await execFileAsync(
-      'yt-dlp',
-      ['--no-warnings', '--dump-json', '--no-playlist', url],
-      { timeout: 60000, maxBuffer: 1024 * 1024 * 20 }
-    );
-    info = JSON.parse(stdout.trim().split('\n')[0]);
-  } catch (err) {
-    console.error('[BiliSave] yt-dlp info error:', err);
-    return res.status(500).json({ error: 'Could not fetch video info.' });
+  const trimmedUrl = url.trim();
+
+  if (!isBilibiliUrl(trimmedUrl)) {
+    return res.status(400).json({ error: 'Please provide a valid Bilibili or b23.tv URL.' });
   }
 
-  const formats = info.formats || [];
-  const combined = formats
-    .filter((f) => f.url && f.vcodec && f.vcodec !== 'none' && f.acodec && f.acodec !== 'none' && (f.height || 0) <= 720)
-    .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-  const videoOnly = formats
-    .filter((f) => f.url && f.vcodec && f.vcodec !== 'none' && (!f.acodec || f.acodec === 'none') && (f.height || 0) <= 720)
-    .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-  const audioOnly = formats
-    .filter((f) => f.url && f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'))
-    .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
+  const format = hd === true
+    ? 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b'
+    : 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]';
 
-  const rawTitle = (title || info.title || 'video').toString();
-  let asciiName = rawTitle.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_').trim();
-  if (!asciiName) asciiName = 'video';
+  const rawTitle = (title || 'video').toString();
+  const asciiName = rawTitle.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_').trim() || 'video';
   const encodedName = encodeURIComponent(rawTitle).replace(/['()]/g, escape).replace(/\*/g, '%2A');
 
-  const ffmpegArgs = ['-hide_banner', '-loglevel', 'error'];
+  const ytdlp = spawn('yt-dlp', [
+    '--no-warnings',
+    '--no-playlist',
 
-  if (combined) {
-    ffmpegArgs.push('-headers', headersToFFmpeg(getHeaders(combined)), '-i', combined.url);
-  } else if (videoOnly && audioOnly) {
-    ffmpegArgs.push('-headers', headersToFFmpeg(getHeaders(videoOnly)), '-i', videoOnly.url);
-    ffmpegArgs.push('-headers', headersToFFmpeg(getHeaders(audioOnly)), '-i', audioOnly.url);
-    ffmpegArgs.push('-map', '0:v:0', '-map', '1:a:0');
-  } else {
-    return res.status(500).json({ error: 'No downloadable stream found for this video.' });
-  }
+    '--concurrent-fragments',
+    '16',
 
-  ffmpegArgs.push(
-    '-c', 'copy',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-    '-f', 'mp4',
-    'pipe:1'
-  );
+    '--retries',
+    '5',
 
-  const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--fragment-retries',
+    '5',
+
+    '--socket-timeout',
+    '30',
+
+    '-f',
+    format,
+
+    // Merge video + audio into MP4, written straight to stdout ("-")
+    // instead of a file on disk.
+    '--merge-output-format',
+    'mp4',
+
+    '-o',
+    '-',
+
+    trimmedUrl,
+  ]);
 
   let stderr = '';
-  ffmpeg.stderr.on('data', (d) => {
-    stderr += d.toString();
-    if (stderr.length > 8000) stderr = stderr.slice(-8000);
+  let headersSent = false;
+
+  ytdlp.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
   });
 
-  let headersSent = false;
-  ffmpeg.stdout.once('data', () => {
+  ytdlp.stdout.once('data', (firstChunk) => {
+    // Only commit to a 200 + streaming response once we know yt-dlp is
+    // actually producing video bytes. If it fails before this point,
+    // we still get to send a clean JSON error instead of a half-open
+    // stream.
     if (!headersSent) {
       headersSent = true;
-      res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Content-Disposition': `attachment; filename="${asciiName}.mp4"; filename*=UTF-8''${encodedName}.mp4`,
-        'Cache-Control': 'no-store',
-      });
+      res.status(200);
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${asciiName}.mp4"; filename*=UTF-8''${encodedName}.mp4`
+      );
+    }
+    res.write(firstChunk);
+  });
+
+  ytdlp.stdout.on('data', (chunk) => {
+    if (headersSent) {
+      res.write(chunk);
     }
   });
 
-  ffmpeg.stdout.pipe(res);
-
-  ffmpeg.on('error', (err) => {
-    console.error('[BiliSave] ffmpeg spawn error:', err);
-    if (!res.headersSent) res.status(500).json({ error: 'Could not start ffmpeg.' });
+  ytdlp.on('error', (err) => {
+    console.error('[BiliSave] yt-dlp spawn error:', err);
+    if (!headersSent) {
+      res.status(500).json({ error: 'Failed to start downloader.' });
+    } else {
+      res.end();
+    }
   });
 
-  ffmpeg.on('close', (code) => {
+  ytdlp.on('close', (code) => {
     if (code !== 0 && !headersSent) {
-      console.error(stderr);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Streaming failed.', details: stderr.slice(0, 500) });
-      }
+      console.error('[BiliSave] yt-dlp failed:', stderr.slice(0, 500));
+      res.status(422).json({
+        error: 'Could not download this video. It may be private, deleted, region-locked, or need a format this downloader cannot merge on the fly.',
+      });
+      return;
     }
+    res.end();
   });
 
   req.on('close', () => {
-    if (!ffmpeg.killed) ffmpeg.kill('SIGKILL');
+    // Client disconnected early — stop yt-dlp instead of letting it run
+    // to completion for nothing.
+    if (!ytdlp.killed) {
+      ytdlp.kill('SIGKILL');
+    }
   });
 }
 
