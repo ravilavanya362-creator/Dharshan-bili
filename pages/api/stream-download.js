@@ -19,9 +19,27 @@ function isValidBvid(value) {
 
 function biliHeaders() {
   return {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
     Referer: 'https://www.bilibili.com/',
+    Origin: 'https://www.bilibili.com',
+    'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'sec-fetch-site': 'same-site',
+    'sec-fetch-mode': 'cors',
   };
+}
+
+async function fetchBiliJson(url) {
+  const resp = await fetch(url, { headers: biliHeaders() });
+  const text = await resp.text();
+
+  if (text.trim().startsWith('<')) {
+    throw new Error('BLOCKED_BY_ANTIBOT');
+  }
+
+  return JSON.parse(text);
 }
 
 export default async function handler(req, res) {
@@ -34,11 +52,9 @@ export default async function handler(req, res) {
   try {
     // Re-resolve aid/cid fresh each time (avoids passing a signed URL
     // between requests, which can go stale or get rejected).
-    const viewResp = await fetch(
-      `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
-      { headers: biliHeaders() }
+    const viewJson = await fetchBiliJson(
+      `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`
     );
-    const viewJson = await viewResp.json();
 
     if (viewJson.code !== 0 || !viewJson.data) {
       return res.status(404).json({ error: 'Video not found.' });
@@ -46,11 +62,9 @@ export default async function handler(req, res) {
 
     const { aid, cid } = viewJson.data;
 
-    const playResp = await fetch(
-      `https://api.bilibili.com/x/player/playurl?avid=${aid}&cid=${cid}&qn=16&type=mp4&platform=html5&high_quality=1`,
-      { headers: biliHeaders() }
+    const playJson = await fetchBiliJson(
+      `https://api.bilibili.com/x/player/playurl?avid=${aid}&cid=${cid}&qn=16&type=mp4&platform=html5&high_quality=1`
     );
-    const playJson = await playResp.json();
 
     const directUrl = playJson?.data?.durl?.[0]?.url;
 
@@ -85,8 +99,11 @@ export default async function handler(req, res) {
 
     Readable.fromWeb(videoResp.body).pipe(res);
   } catch (error) {
+    if (error.message === 'BLOCKED_BY_ANTIBOT') {
+      console.error('[BiliSave] stream-download error: Bilibili returned an HTML anti-bot block page instead of JSON.');
+      return res.status(503).json({ error: 'Bilibili is currently blocking requests from this server. Please try again later.' });
+    }
     console.error('[BiliSave] stream-download error:', error);
     return res.status(500).json({ error: 'Something went wrong while downloading.' });
   }
 }
-
