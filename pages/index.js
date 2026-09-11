@@ -102,14 +102,53 @@ export default function Home({ allPosts }) {
     }
   };
 
-  const handleVideoDownload = () => {
+  const handleVideoDownload = async () => {
     if (!result?.videoUrl) return;
 
-    const downloadUrl = `/api/direct-download?url=${encodeURIComponent(
-      result.videoUrl
-    )}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+    setDownloadPreparing(true);
+    setDownloadProgress(0);
+    setError('');
 
-    window.location.href = downloadUrl;
+    try {
+      const downloadUrl = `/api/direct-download?url=${encodeURIComponent(
+        result.videoUrl
+      )}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+
+      const response = await fetch(downloadUrl);
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'Could not download this video.');
+      }
+
+      const reader = response.body.getReader();
+      const chunks = [];
+      let loadedBytes = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loadedBytes += value.length;
+        setDownloadProgress(loadedBytes / (1024 * 1024));
+      }
+
+      const blob = new Blob(chunks, { type: 'video/mp4' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${result.title || 'Bilibili Video'}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+
+      setDownloadPreparing(false);
+    } catch (err) {
+      setError(err.message || 'Something went wrong while downloading.');
+      setDownloadPreparing(false);
+    }
   };
 
   const formatFileSize = (bytes) => {
@@ -351,7 +390,6 @@ export default function Home({ allPosts }) {
                     </a>
                   </div>
                 )}
-
                 {downloadPreparing && (
                   <div
                     style={{
@@ -366,7 +404,10 @@ export default function Home({ allPosts }) {
                       lineHeight: '1.4',
                     }}
                   >
-                    ⏳ Downloading... {Math.round(downloadProgress)}%
+                    ⏳{' '}
+                    {downloadProgress > 0
+                      ? `Downloading... ${downloadProgress.toFixed(1)} MB so far`
+                      : 'Preparing your video, please wait...'}
                     <div
                       style={{
                         marginTop: '6px',
@@ -380,7 +421,7 @@ export default function Home({ allPosts }) {
                       <div
                         style={{
                           height: '100%',
-                          width: `${Math.max(4, Math.round(downloadProgress))}%`,
+                          width: `${Math.min(96, Math.max(6, downloadProgress * 2))}%`,
                           background: '#22c55e',
                           borderRadius: '99px',
                           transition: 'width 0.4s ease',
@@ -388,7 +429,7 @@ export default function Home({ allPosts }) {
                       />
                     </div>
                     <span style={{ fontWeight: 500, color: '#64748b' }}>
-                      {downloadProgress >= 100 ? 'Finalizing video, almost done...' : "Don't close this page."}
+                      Don't close this page.
                     </span>
                   </div>
                 )}
@@ -735,3 +776,4 @@ export async function getStaticProps() {
   };
 }
 
+        
