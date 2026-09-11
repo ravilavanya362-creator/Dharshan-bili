@@ -1,24 +1,27 @@
-FROM node:18-slim
+FROM node:20-bookworm-slim
 
-# Install Python, FFmpeg and dependencies required for yt-dlp
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     ffmpeg \
+    ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install latest yt-dlp globally via pip
-RUN pip3 install --no-cache-dir --upgrade yt-dlp
+RUN pip3 install --break-system-packages --no-cache-dir -U yt-dlp
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+
+RUN npm install --omit=dev
 
 COPY . .
 
 RUN npm run build
 
-EXPOSE 3000
-CMD ["npm", "start"]
+ENV PORT=10000
+
+EXPOSE 10000
+
+CMD ["sh", "-c", "./node_modules/.bin/next start -p ${PORT:-10000}"]
