@@ -2,7 +2,12 @@ import { getAllPosts } from '../lib/posts';
 
 const baseUrl = 'https://bilisave.com';
 
-export default function sitemap(req, res) {
+function SiteMap() {
+  // getServerSideProps handles the actual response — this component never renders.
+  return null;
+}
+
+export async function getServerSideProps({ res }) {
   const posts = getAllPosts();
 
   const staticPages = [
@@ -17,11 +22,11 @@ export default function sitemap(req, res) {
   ];
 
   const urls = staticPages.map((path) => ({
-    loc: `${BASE_URL}${path}`,
+    loc: `${baseUrl}${path}`,
   }));
 
   const blogUrls = posts.map((post) => ({
-    loc: `${BASE_URL}/blog/${post.slug}`,
+    loc: `${baseUrl}/blog/${post.slug}`,
     lastmod: new Date(post.date).toISOString(),
   }));
 
@@ -43,4 +48,9 @@ ${allUrls
   res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   res.write(xml);
   res.end();
+
+  return { props: {} };
 }
+
+export default SiteMap;
+
