@@ -18,6 +18,36 @@ function isBilibiliUrl(value) {
   }
 }
 
+// Bilibili sometimes blocks requests that don't look like a real browser
+// (missing Accept/Accept-Language/sec- headers) with an HTML challenge
+// page instead of JSON. Send a fuller header set to reduce that risk.
+function biliHeaders() {
+  return {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    Referer: 'https://www.bilibili.com/',
+    Origin: 'https://www.bilibili.com',
+    'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'sec-fetch-site': 'same-site',
+    'sec-fetch-mode': 'cors',
+  };
+}
+
+// Fetches JSON but detects & reports HTML anti-bot block pages clearly
+// instead of crashing on JSON.parse.
+async function fetchBiliJson(url) {
+  const resp = await fetch(url, { headers: biliHeaders() });
+  const text = await resp.text();
+
+  if (text.trim().startsWith('<')) {
+    throw new Error('BLOCKED_BY_ANTIBOT');
+  }
+
+  return JSON.parse(text);
+}
+
 // b23.tv links are short redirects — follow them to get the real
 // bilibili.com URL that contains the BV id.
 async function resolveBvid(inputUrl) {
@@ -27,7 +57,7 @@ async function resolveBvid(inputUrl) {
   if (host === 'b23.tv' || host === 'www.b23.tv') {
     const resp = await fetch(url, {
       redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: { 'User-Agent': biliHeaders()['User-Agent'] },
     });
     url = resp.url;
   }
@@ -59,16 +89,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const viewResp = await fetch(
-      `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          Referer: 'https://www.bilibili.com/',
-        },
-      }
+    const viewJson = await fetchBiliJson(
+      `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`
     );
-    const viewJson = await viewResp.json();
 
     if (viewJson.code !== 0 || !viewJson.data) {
       return res.status(200).json({
@@ -87,6 +110,13 @@ export default async function handler(req, res) {
       bvid,
     });
   } catch (error) {
+    if (error.message === 'BLOCKED_BY_ANTIBOT') {
+      console.error('[BiliSave] Parse error: Bilibili returned an HTML anti-bot block page instead of JSON.');
+      return res.status(200).json({
+        success: false,
+        error: 'Bilibili is currently blocking requests from this server. Please try again later.',
+      });
+    }
     console.error('[BiliSave] Parse error:', error);
     return res.status(200).json({
       success: false,
@@ -94,3 +124,4 @@ export default async function handler(req, res) {
     });
   }
 }
+
