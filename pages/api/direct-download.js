@@ -72,6 +72,13 @@ export default async function handler(req, res) {
     '--merge-output-format',
     'mp4',
 
+    // Since output is a live pipe (not a seekable file), ffmpeg can't
+    // do the normal two-pass "faststart" metadata placement. Using
+    // fragmented MP4 flags instead keeps metadata streaming-friendly,
+    // which fixes thumbnail generation and playback in file managers.
+    '--postprocessor-args',
+    'Merger+ffmpeg_o:-movflags frag_keyframe+empty_moov',
+
     '-o',
     '-',
 
