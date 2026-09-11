@@ -25,22 +25,23 @@ export default async function handler(req, res) {
   const outTemplate = path.join(os.tmpdir(), `${id}.%(ext)s`);
   const finalPath = path.join(os.tmpdir(), `${id}.mp4`);
 
-    const ytdlp = spawn('yt-dlp', [
+      const ytdlp = spawn('yt-dlp', [
     '--no-warnings',
     '--no-playlist',
-    '--concurrent-fragments', '16',
-    '--buffer-size', '16K',
+    '--concurrent-fragments', '8',
+    '--buffer-size', '8K',
     '--retries', '3',
     '--fragment-retries', '3',
     '--socket-timeout', '15',
     
-    // ఇక్కడ ఫార్మాట్ కచ్చితంగా వీడియో + ఆడియో కలిపి mp4 లోకి మర్జ్ అయ్యేలా సెట్ చేయాలి
-    '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    // RAM ఓవర్‌లోడ్ అవ్వకుండా కేవలం 720p లేదా అంతకంటే తక్కువ ఉండేలా లిమిట్ చేయడం
+    '-f', 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]',
     '--merge-output-format', 'mp4',
 
     '-o', outTemplate,
     url,
   ]);
+
 
   let stderr = '';
   ytdlp.stderr.on('data', (chunk) => {
