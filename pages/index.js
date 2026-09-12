@@ -108,7 +108,6 @@ export default function Home({ allPosts }) {
     setDownloadPreparing(true);
     setError('');
 
-    // సర్వర్ API కి పంపకుండా నేరుగా Bilibili లింక్‌తో ట్రిగ్గర్ చేస్తున్నాం
     const link = document.createElement('a');
     link.href = result.videoUrl;
     link.download = `${result.title || 'Bilibili Video'}.mp4`;
@@ -123,21 +122,6 @@ export default function Home({ allPosts }) {
       setDownloadPreparing(false);
     }, 2000);
   };
-
-  const link = document.createElement('a');
-
-  link.href = downloadUrl;
-  link.download = `${result.title || 'Bilibili Video'}.mp4`;
-  link.rel = 'noopener';
-
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  window.setTimeout(() => {
-    setDownloadPreparing(false);
-  }, 2500);
-};
 
   const formatFileSize = (bytes) => {
     if (!bytes || isNaN(bytes)) return '';
@@ -161,7 +145,8 @@ export default function Home({ allPosts }) {
     result?.filesize_approx ||
     result?.size ||
     0;
-    return (
+
+  return (
     <Layout
       title="Bilibili Video Downloader – Download HD MP4 Videos"
       description="Download Bilibili videos online in HD MP4 quality. Paste a bilibili.com or b23.tv link and save videos quickly without installing an app."
@@ -180,10 +165,10 @@ export default function Home({ allPosts }) {
           </h1>
 
           <p>
-  Download Bilibili videos online in high-quality MP4.
-  Paste a bilibili.com or b23.tv link below to quickly extract
-  and save your video without installing an app.
-</p>
+            Download Bilibili videos online in high-quality MP4.
+            Paste a bilibili.com or b23.tv link below to quickly extract
+            and save your video without installing an app.
+          </p>
 
           <form onSubmit={handleDownload} className="input-card">
             <div className="input-group">
@@ -269,60 +254,60 @@ export default function Home({ allPosts }) {
           )}
 
           {result && (
-  <div
-    className="result-card"
-    style={{
-      background: '#fff',
-      padding: '20px',
-      borderRadius: '16px',
-      border: '1px solid #e2e8f0',
-      textAlign: 'left',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '16px',
-      alignItems: 'center',
-      width: '100%',
-      maxWidth: '100%',
-      overflow: 'hidden',
-      marginTop: '16px',
-    }}
-  >
-{result.thumbnail && (
-  <img
-    src={`/api/thumbnail?url=${encodeURIComponent(result.thumbnail)}`}
-    alt="Thumbnail"
-    style={{
-      width: '120px',
-      height: '75px',
-      objectFit: 'cover',
-      borderRadius: '8px',
-      flexShrink: 0,
-    }}
-  />
-)}
+            <div
+              className="result-card"
+              style={{
+                background: '#fff',
+                padding: '20px',
+                borderRadius: '16px',
+                border: '1px solid #e2e8f0',
+                textAlign: 'left',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px',
+                alignItems: 'center',
+                width: '100%',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                marginTop: '16px',
+              }}
+            >
+              {result.thumbnail && (
+                <img
+                  src={`/api/thumbnail?url=${encodeURIComponent(result.thumbnail)}`}
+                  alt="Thumbnail"
+                  style={{
+                    width: '120px',
+                    height: '75px',
+                    objectFit: 'cover',
+                    borderRadius: '8px',
+                    flexShrink: 0,
+                  }}
+                />
+              )}
 
-<div
-  className="result-content"
-  style={{
-    flex: '1 1 auto',
-    minWidth: 0,
-    maxWidth: '100%',
-    overflow: 'hidden',
-    width: '100%',
-  }}
->
-  <h3
-    style={{
-      fontSize: '1rem',
-      fontWeight: 700,
-      marginBottom: '6px',
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    }}
-  >
-    {result.title || 'Bilibili Video'}
- </h3> 
+              <div
+                className="result-content"
+                style={{
+                  flex: '1 1 auto',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  width: '100%',
+                }}
+              >
+                <h3
+                  style={{
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    marginBottom: '6px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {result.title || 'Bilibili Video'}
+                </h3> 
                 {videoSize && (
                   <div
                     style={{
@@ -378,63 +363,18 @@ export default function Home({ allPosts }) {
                     </a>
                   </div>
                 )}
-                {downloadPreparing && (
-                  <div
-                    style={{
-                      marginTop: '10px',
-                      padding: '10px 12px',
-                      background: '#f0fdf4',
-                      border: '1px solid #bbf7d0',
-                      borderRadius: '9px',
-                      color: '#15803d',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      lineHeight: '1.4',
-                    }}
-                  >
-                    ⏳{' '}
-                    {downloadProgress > 0
-                      ? `Downloading... ${downloadProgress.toFixed(1)} MB so far`
-                      : 'Preparing your video, please wait...'}
-                    <div
-                      style={{
-                        marginTop: '6px',
-                        height: '6px',
-                        width: '100%',
-                        background: '#dcfce7',
-                        borderRadius: '99px',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${Math.min(96, Math.max(6, downloadProgress * 2))}%`,
-                          background: '#22c55e',
-                          borderRadius: '99px',
-                          transition: 'width 0.4s ease',
-                        }}
-                      />
-                    </div>
-                    <span style={{ fontWeight: 500, color: '#64748b' }}>
-                      Don't close this page.
-                    </span>
-                  </div>
-                )}
               </div>
+            </div>
+          )}
 
-          <div className="trust-bar">
-  <span className="trust-item">⚡ Ultra Fast</span>
-  <span className="trust-item">🛡️ 100% Secure</span>
-  <span className="trust-item">✨ No Registration</span>
-</div>
-      </div>
-
-                )}
-                  </div>
-    </section>
-
-      {/* HOW TO DOWNLOAD SECTION */}
+          <div className="trust-bar" style={{ marginTop: '20px' }}>
+            <span className="trust-item">⚡ Ultra Fast</span>
+            <span className="trust-item">🛡️ 100% Secure</span>
+            <span className="trust-item">✨ No Registration</span>
+          </div>
+        </div>
+      </section>
+                        {/* HOW TO DOWNLOAD SECTION */}
       <section className="howto-section" style={{ paddingBottom: '30px' }}>
         <div className="container" style={{ maxWidth: '920px' }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
@@ -525,17 +465,15 @@ export default function Home({ allPosts }) {
                         </div>
                       </div>
 
-                            {post.tagline && (
-        <div className="thumb-heading">
-          <p className="thumb-title" style={{ fontSize: '0.9rem' }}>
-            {post.tagline}
-          </p>
-        </div>
-      )}
-    </div>
-
-                        
-                </div>
+                      {post.tagline && (
+                        <div className="thumb-heading">
+                          <p className="thumb-title" style={{ fontSize: '0.9rem' }}>
+                            {post.tagline}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <div className="post-card-body" style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                       <span className="post-date" style={{ fontSize: '0.75rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase' }}>
@@ -552,7 +490,6 @@ export default function Home({ allPosts }) {
                     <h3 style={{ fontSize: '1.1rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '8px', lineHeight: '1.35' }}>
                       {post.title}
                     </h3>
-
                     <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.55', marginBottom: '16px', flex: 1, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {post.excerpt}
                     </p>
@@ -569,127 +506,71 @@ export default function Home({ allPosts }) {
           </div>
         </div>
       </section>
-{/* SEO INFORMATION SECTION */}
-<section
-  className="seo-info-section"
-  style={{
-    padding: '40px 20px',
-    marginTop: '30px'
-  }}
->
-  <div
-    className="container"
-    style={{
-      maxWidth: '920px',
-      margin: '0 auto',
-      background: '#ffffff',
-      padding: '30px 24px',
-      borderRadius: '20px',
-      border: '1px solid #e2e8f0'
-    }}
-  >
-    <h2 style={{
-      fontSize: '1.7rem',
-      fontWeight: 800,
-      marginBottom: '14px',
-      color: '#0f172a'
-    }}>
-      Free Bilibili Video Downloader Online
-    </h2>
 
-    <p style={{
-      color: '#475569',
-      lineHeight: 1.8,
-      marginBottom: '28px'
-    }}>
-      Bili Save is an online Bilibili video downloader that lets you
-      download videos from bilibili.com and b23.tv links in high-quality
-      MP4 format. You can use it directly from your web browser without
-      installing an additional app or browser extension.
-    </p>
-
-    <h2 style={{
-      fontSize: '1.7rem',
-      fontWeight: 800,
-      marginBottom: '14px',
-      color: '#0f172a'
-    }}>
-      How to Download Bilibili Videos
-    </h2>
-
-    <ol style={{
-      color: '#475569',
-      lineHeight: 1.9,
-      paddingLeft: '24px',
-      marginBottom: '28px'
-    }}>
-      <li>Copy the Bilibili video link from bilibili.com or b23.tv.</li>
-      <li>Paste the link into the Bili Save downloader above.</li>
-      <li>Wait while the video information is extracted.</li>
-      <li>Select the available quality and start the download.</li>
-    </ol>
-
-    <h2 style={{
-      fontSize: '1.7rem',
-      fontWeight: 800,
-      marginBottom: '14px',
-      color: '#0f172a'
-    }}>
-      Bilibili HD Video Downloader
-    </h2>
-
-    <p style={{
-      color: '#475569',
-      lineHeight: 1.8,
-      marginBottom: '28px'
-    }}>
-      Bili Save makes it simple to save Bilibili videos on Android,
-      iPhone, Windows, Mac, and other modern devices. The available
-      video quality depends on the original video and the stream
-      provided by Bilibili.
-    </p>
-
-    <h2 style={{
-      fontSize: '1.7rem',
-      fontWeight: 800,
-      marginBottom: '14px',
-      color: '#0f172a'
-    }}>
-      Download Bilibili Videos Without Installing an App
-    </h2>
-
-    <p style={{
-      color: '#475569',
-      lineHeight: 1.8,
-      marginBottom: '16px'
-    }}>
-      You can use Bili Save directly from your browser. Simply paste
-      a supported Bilibili link and follow the download steps. No
-      additional software or browser extension is required.
-    </p>
-
-    <p style={{
-      color: '#475569',
-      lineHeight: 1.8,
-      margin: 0
-    }}>
-      For a detailed walkthrough, read our{' '}
-      <Link
-        href="/blog/how-to-download-bilibili-videos-hd-complete-guide"
+      {/* SEO INFORMATION SECTION */}
+      <section
+        className="seo-info-section"
         style={{
-          color: '#ff0844',
-          fontWeight: 700,
-          textDecoration: 'none'
+          padding: '40px 20px',
+          marginTop: '30px'
         }}
       >
-        complete guide to downloading Bilibili videos
-      </Link>.
-    </p>
-  </div>
-</section>
+        <div
+          className="container"
+          style={{
+            maxWidth: '920px',
+            margin: '0 auto',
+            background: '#ffffff',
+            padding: '30px 24px',
+            borderRadius: '20px',
+            border: '1px solid #e2e8f0'
+          }}
+        >
+          <h2 style={{
+            fontSize: '1.7rem',
+            fontWeight: 800,
+            marginBottom: '14px',
+            color: '#0f172a'
+          }}>
+            Free Bilibili Video Downloader Online
+          </h2>
+
+          <p style={{
+            color: '#475569',
+            lineHeight: 1.8,
+            marginBottom: '28px'
+          }}>
+            Bili Save is an online Bilibili video downloader that lets you
+            download videos from bilibili.com and b23.tv links in high-quality
+            MP4 format. You can use it directly from your web browser without
+            installing an additional app or browser extension.
+          </p>
+
+          <h2 style={{
+            fontSize: '1.7rem',
+            fontWeight: 800,
+            marginBottom: '14px',
+            color: '#0f172a'
+          }}>
+            How to Download Bilibili Videos
+          </h2>
+
+          <ol style={{
+            color: '#475569',
+            lineHeight: 1.9,
+            paddingLeft: '24px',
+            marginBottom: '28px'
+          }}>
+            <li>Copy the Bilibili video link from bilibili.com or b23.tv.</li>
+            <li>Paste the link into the Bili Save downloader above.</li>
+            <li>Wait while the video information is extracted.</li>
+            <li>Select the available quality and start the download.</li>
+          </ol>
+        </div>
+      </section>
 
       {/* FAQ SECTION */}
-      <section className="faq-section">
+      <section className="faq-section" style={{ paddingBottom: '60px' }}>
         <div className="container" style={{ maxWidth: '920px' }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <div className="eyebrow" style={{ background: 'rgba(255, 8, 68, 0.08)', color: '#ff0844', border: '1px solid rgba(255, 8, 68, 0.15)' }}>
@@ -762,6 +643,5 @@ export async function getStaticProps() {
       allPosts,
     },
   };
-}
-
-        
+                  }
+                          
