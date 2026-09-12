@@ -102,17 +102,18 @@ export default function Home({ allPosts }) {
     }
   };
 
-      const handleVideoDownload = () => {
+  const handleVideoDownload = () => {
     if (!result?.videoUrl || downloadPreparing) return;
 
     setDownloadPreparing(true);
     setError('');
 
-    const downloadApiUrl = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
-
     const link = document.createElement('a');
-    link.href = downloadApiUrl;
-    link.setAttribute('download', `${result.title || 'Bilibili Video'}.mp4`);
+    link.href = result.videoUrl;
+    link.download = `${result.title || 'Bilibili Video'}.mp4`;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+
     document.body.appendChild(link);
     link.click();
     link.remove();
