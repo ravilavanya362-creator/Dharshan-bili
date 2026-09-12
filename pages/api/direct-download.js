@@ -1,48 +1,48 @@
-import axios from 'axios';
-
 export default async function handler(req, res) {
-  const { url, title } = req.query;
+  const { url } = req.query;
 
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({
+      error: 'Video URL is required.',
+    });
   }
 
   try {
-    const filename = `${encodeURIComponent(title || 'bilibili-video')}.mp4`;
+    const videoUrl = decodeURIComponent(url);
 
-    // Bilibili CDN నుండి హై-స్పీడ్ స్ట్రీమ్ ఫెచ్ చేయడం
-    const response = await axios({
-      method: 'GET',
-      url: url,
-      responseType: 'stream',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.bilibili.com',
-        'Range': req.headers.range || 'bytes=0-'
-      },
-      maxRedirects: 5
-    });
+    // Only allow Bilibili CDN URLs
+    const parsed = new URL(videoUrl);
+    const host = parsed.hostname.toLowerCase();
 
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    if (response.headers['content-length']) {
-      res.setHeader('Content-Length', response.headers['content-length']);
+    const allowed =
+      host === 'bilibili.com' ||
+      host.endsWith('.bilibili.com') ||
+      host.endsWith('.hdslb.com') ||
+      host.endsWith('.bilivideo.com') ||
+      host.endsWith('.mcdn.bilivideo.cn');
+
+    if (!allowed) {
+      return res.status(400).json({
+        error: 'Invalid Bilibili video URL.',
+      });
     }
 
-    response.data.pipe(res);
+    // IMPORTANT:
+    // Do NOT download/proxy the video through Vercel.
+    // Redirect the user's browser directly to Bilibili CDN.
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Location', videoUrl);
+
+    return res.status(307).end();
+
   } catch (error) {
-    console.error('Download proxy error:', error.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to stream video for download.' });
-    }
+    console.error(
+      '[BiliSave] Redirect error:',
+      error?.message || error
+    );
+
+    return res.status(500).json({
+      error: 'Unable to start the download.',
+    });
   }
 }
-
-export const config = {
-  api: {
-    responseLimit: false,
-  },
-};
-
