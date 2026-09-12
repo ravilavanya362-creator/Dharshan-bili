@@ -103,18 +103,26 @@ export default function Home({ allPosts }) {
   };
 
   const handleVideoDownload = () => {
-  if (!result?.videoUrl || downloadPreparing) return;
+    if (!result?.videoUrl || downloadPreparing) return;
 
-  setDownloadPreparing(true);
-  setDownloadProgress(0);
-  setError('');
+    setDownloadPreparing(true);
+    setError('');
 
-  const downloadUrl =
-    `/api/direct-download?url=${encodeURIComponent(
-      result.videoUrl
-    )}&title=${encodeURIComponent(
-      result.title || 'Bilibili Video'
-    )}`;
+    // సర్వర్ API కి పంపకుండా నేరుగా Bilibili లింక్‌తో ట్రిగ్గర్ చేస్తున్నాం
+    const link = document.createElement('a');
+    link.href = result.videoUrl;
+    link.download = `${result.title || 'Bilibili Video'}.mp4`;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.setTimeout(() => {
+      setDownloadPreparing(false);
+    }, 2000);
+  };
 
   const link = document.createElement('a');
 
