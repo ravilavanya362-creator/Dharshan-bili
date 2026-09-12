@@ -197,49 +197,55 @@ function startJob(job) {
   // First attempt:
   // Best available separate video + audio streams.
   const firstAttempt = [
-    '--no-playlist',
-    '--newline',
-    '--retries',
-    '5',
-    '--fragment-retries',
-    '5',
-    '--socket-timeout',
-    '30',
-    '--http-chunk-size',
-    '5M',
-    '--force-ipv4',
-    '--concurrent-fragments',
-    '4',
-    '--merge-output-format',
-    'mp4',
-    '-f',
-    'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b',
-    '-o',
-    job.filePath,
-    job.url
-  ];
+  '--no-playlist',
+  '--newline',
+  '--retries',
+  '5',
+  '--fragment-retries',
+  '5',
+  '--socket-timeout',
+  '30',
+  '--http-chunk-size',
+  '10M',
+  '--throttled-rate',
+  '500K',
+  '--force-ipv4',
+  '--concurrent-fragments',
+  '4',
+  '--merge-output-format',
+  'mp4',
+  '-f',
+  'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b',
+  '-o',
+  job.filePath,
+  job.url
+];
 
   // Fallback:
   // Try a progressive/single-file MP4 instead of
   // separately downloading video and audio.
   const fallbackAttempt = [
-    '--no-playlist',
-    '--newline',
-    '--retries',
-    '8',
-    '--fragment-retries',
-    '8',
-    '--socket-timeout',
-    '30',
-    '--force-ipv4',
-    '--merge-output-format',
-    'mp4',
-    '-f',
-    'b[ext=mp4]/b',
-    '-o',
-    job.filePath,
-    job.url
-  ];
+  '--no-playlist',
+  '--newline',
+  '--retries',
+  '5',
+  '--fragment-retries',
+  '5',
+  '--socket-timeout',
+  '30',
+  '--http-chunk-size',
+  '10M',
+  '--throttled-rate',
+  '500K',
+  '--force-ipv4',
+  '--merge-output-format',
+  'mp4',
+  '-f',
+  'b[ext=mp4]/b',
+  '-o',
+  job.filePath,
+  job.url
+];
 
   const finishSuccess = async () => {
     try {
