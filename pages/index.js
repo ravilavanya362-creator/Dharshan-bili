@@ -77,9 +77,10 @@ export default function Home({ allPosts }) {
       }
 
       setResult({
-        ...data,
-        videoUrl,
-      });
+  ...data,
+  videoUrl,
+  sourceUrl: url.trim(),
+});
 
     } catch (err) {
       setError(
@@ -102,37 +103,87 @@ export default function Home({ allPosts }) {
     }
   };
 
-        const handleVideoDownload = async () => {
-    if (!result?.videoUrl || downloadPreparing) return;
+          const handleVideoDownload = async () => {
+    if (!result?.sourceUrl || downloadPreparing) return;
+
+    const downloaderApi =
+      process.env.NEXT_PUBLIC_DOWNLOADER_API;
+
+    if (!downloaderApi) {
+      setError('Downloader server is not configured.');
+      return;
+    }
 
     setDownloadPreparing(true);
+    setDownloadProgress(0);
     setError('');
 
     try {
-      // సర్వర్ మీద లోడ్ పడకుండా నేరుగా క్లయింట్ సైడ్ ద్వారా ఫెచ్ చేసి డౌన్‌లోడ్ చేయడం
-      const response = await fetch(result.videoUrl, {
-        method: 'GET',
+      const api = downloaderApi.replace(/\/+$/, '');
+
+      // Start download job on Render
+      const startResponse = await fetch(`${api}/start`, {
+        method: 'POST',
         headers: {
-          'Referer': 'https://www.bilibili.com',
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          url: result.sourceUrl,
+          title: result.title || 'Bilibili Video',
+        }),
       });
 
-      if (!response.ok) throw new Error('Download failed from source.');
+      const startData = await startResponse.json();
 
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
+      if (!startResponse.ok || !startData.success) {
+        throw new Error(
+          startData.error || 'Could not start download.'
+        );
+      }
 
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = `${result.title || 'Bilibili Video'}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(blobUrl);
+      const jobId = startData.jobId;
+
+      // Check download progress
+      while (true) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1500)
+        );
+
+        const statusResponse = await fetch(
+          `${api}/status?id=${encodeURIComponent(jobId)}`
+        );
+
+        const statusData = await statusResponse.json();
+
+        if (!statusResponse.ok || !statusData.success) {
+          throw new Error(
+            statusData.error || 'Could not check download status.'
+          );
+        }
+
+        setDownloadProgress(
+          Number(statusData.progress || 0)
+        );
+
+        if (statusData.status === 'done') {
+          // Render sends the finished MP4 as an attachment
+          window.location.href =
+            `${api}/file?id=${encodeURIComponent(jobId)}`;
+
+          break;
+        }
+
+        if (statusData.status === 'error') {
+          throw new Error(
+            statusData.error || 'Download failed.'
+          );
+        }
+      }
 
     } catch (err) {
-      // ఒకవేళ డైరెక్ట్ ఫెచ్ క్రాస్-ఆర్జిన్ (CORS) వల్ల ఆగిపోతే, నేరుగా ట్యాబ్ ఓపెన్ అయ్యేలా ఫాల్‌బ్యాక్
-      window.open(result.videoUrl, '_blank');
+      setError(
+        err.message || 'Download failed. Please try again.'
+      );
     } finally {
       setDownloadPreparing(false);
     }
