@@ -10,6 +10,7 @@ export default async function handler(req, res) {
   try {
     const filename = `${encodeURIComponent(title || 'bilibili-video')}.mp4`;
 
+    // Bilibili CDN నుండి హై-స్పీడ్ స్ట్రీమ్ ఫెచ్ చేయడం
     const response = await axios({
       method: 'GET',
       url: url,
@@ -18,7 +19,8 @@ export default async function handler(req, res) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://www.bilibili.com',
         'Range': req.headers.range || 'bytes=0-'
-      }
+      },
+      maxRedirects: 5
     });
 
     res.setHeader('Content-Type', 'video/mp4');
