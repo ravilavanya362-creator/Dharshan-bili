@@ -102,25 +102,34 @@ export default function Home({ allPosts }) {
     }
   };
 
-  const handleVideoDownload = () => {
+    const handleVideoDownload = async () => {
     if (!result?.videoUrl || downloadPreparing) return;
 
     setDownloadPreparing(true);
     setError('');
 
-    const link = document.createElement('a');
-    link.href = result.videoUrl;
-    link.download = `${result.title || 'Bilibili Video'}.mp4`;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
+    try {
+      const downloadApiUrl = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+      
+      const response = await fetch(downloadApiUrl);
+      if (!response.ok) throw new Error('Download failed');
 
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
 
-    window.setTimeout(() => {
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${result.title || 'Bilibili Video'}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+
+    } catch (err) {
+      setError('Failed to download video file. Please try again.');
+    } finally {
       setDownloadPreparing(false);
-    }, 2000);
+    }
   };
 
   const formatFileSize = (bytes) => {
