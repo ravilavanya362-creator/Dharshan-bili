@@ -598,10 +598,9 @@ async function handleFile(req, res, url) {
     );
 
     res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}.mp4"; filename*=UTF-8''${encoded}.mp4`
-    );
-
+  'Content-Disposition',
+  'attachment; filename="BiliSave-Video.mp4"'
+);
     res.setHeader(
       'Cache-Control',
       'no-store'
