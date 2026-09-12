@@ -102,35 +102,26 @@ export default function Home({ allPosts }) {
     }
   };
 
-    const handleVideoDownload = async () => {
+      const handleVideoDownload = () => {
     if (!result?.videoUrl || downloadPreparing) return;
 
     setDownloadPreparing(true);
     setError('');
 
-    try {
-      const downloadApiUrl = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
-      
-      const response = await fetch(downloadApiUrl);
-      if (!response.ok) throw new Error('Download failed');
+    const downloadApiUrl = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
 
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadApiUrl;
+    link.setAttribute('download', `${result.title || 'Bilibili Video'}.mp4`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = `${result.title || 'Bilibili Video'}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(blobUrl);
-
-    } catch (err) {
-      setError('Failed to download video file. Please try again.');
-    } finally {
+    window.setTimeout(() => {
       setDownloadPreparing(false);
-    }
+    }, 2000);
   };
+
 
   const formatFileSize = (bytes) => {
     if (!bytes || isNaN(bytes)) return '';
