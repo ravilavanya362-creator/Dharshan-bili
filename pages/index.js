@@ -102,25 +102,26 @@ export default function Home({ allPosts }) {
     }
   };
 
-    const handleVideoDownload = () => {
+      const handleVideoDownload = () => {
     if (!result?.videoUrl || downloadPreparing) return;
 
     setDownloadPreparing(true);
     setError('');
 
-    // బ్రౌజర్ కొత్త ట్యాబ్‌లో ఓపెన్ చేయకుండా ఒక ప్రాక్సీ / లేదా HTML5 download ట్రిగ్గర్
-    const a = document.createElement('a');
-    a.href = result.videoUrl;
-    a.download = `${result.title || 'Bilibili Video'}.mp4`;
-    // ఇక్కడ target="_blank" ఇవ్వకూడదు, ఇస్తేనే ట్యాబ్ ఓపెన్ అవుతుంది
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const downloadApiUrl = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+
+    const link = document.createElement('a');
+    link.href = downloadApiUrl;
+    link.setAttribute('download', `${result.title || 'Bilibili Video'}.mp4`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 
     window.setTimeout(() => {
       setDownloadPreparing(false);
     }, 2000);
   };
+
 
 
 
