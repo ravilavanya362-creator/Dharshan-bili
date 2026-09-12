@@ -10,7 +10,6 @@ export default async function handler(req, res) {
   try {
     const videoUrl = decodeURIComponent(url);
 
-    // Only allow Bilibili CDN URLs
     const parsed = new URL(videoUrl);
     const host = parsed.hostname.toLowerCase();
 
@@ -27,9 +26,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // IMPORTANT:
-    // Do NOT download/proxy the video through Vercel.
-    // Redirect the user's browser directly to Bilibili CDN.
+    // Direct redirect:
+    // Vercel does NOT download or store the video.
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Location', videoUrl);
 
