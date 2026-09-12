@@ -102,25 +102,42 @@ export default function Home({ allPosts }) {
     }
   };
 
-      const handleVideoDownload = () => {
+        const handleVideoDownload = async () => {
     if (!result?.videoUrl || downloadPreparing) return;
 
     setDownloadPreparing(true);
     setError('');
 
-    const downloadApiUrl = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+    try {
+      // సర్వర్ మీద లోడ్ పడకుండా నేరుగా క్లయింట్ సైడ్ ద్వారా ఫెచ్ చేసి డౌన్‌లోడ్ చేయడం
+      const response = await fetch(result.videoUrl, {
+        method: 'GET',
+        headers: {
+          'Referer': 'https://www.bilibili.com',
+        },
+      });
 
-    const link = document.createElement('a');
-    link.href = downloadApiUrl;
-    link.setAttribute('download', `${result.title || 'Bilibili Video'}.mp4`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+      if (!response.ok) throw new Error('Download failed from source.');
 
-    window.setTimeout(() => {
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${result.title || 'Bilibili Video'}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+
+    } catch (err) {
+      // ఒకవేళ డైరెక్ట్ ఫెచ్ క్రాస్-ఆర్జిన్ (CORS) వల్ల ఆగిపోతే, నేరుగా ట్యాబ్ ఓపెన్ అయ్యేలా ఫాల్‌బ్యాక్
+      window.open(result.videoUrl, '_blank');
+    } finally {
       setDownloadPreparing(false);
-    }, 2000);
+    }
   };
+
 
 
 
