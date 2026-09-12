@@ -120,7 +120,6 @@ function updateProgress(job, text) {
 }
 
 function startJob(job) {
-function startJob(job) {
   job.status = 'downloading';
   job.message = 'Downloading video and audio...';
 
@@ -195,6 +194,8 @@ function startJob(job) {
     });
   };
 
+  // First attempt:
+  // Best available separate video + audio streams.
   const firstAttempt = [
     '--no-playlist',
     '--newline',
@@ -218,6 +219,9 @@ function startJob(job) {
     job.url
   ];
 
+  // Fallback:
+  // Try a progressive/single-file MP4 instead of
+  // separately downloading video and audio.
   const fallbackAttempt = [
     '--no-playlist',
     '--newline',
@@ -321,6 +325,7 @@ function startJob(job) {
     });
 
     const downloadPromise = (async () => {
+      // Attempt 1: best quality
       const first = await runAttempt(
         firstAttempt,
         'HIGH QUALITY'
@@ -342,12 +347,15 @@ function startJob(job) {
         `[JOB ${job.id}] Trying fallback MP4 format...`
       );
 
+      // Remove failed/partial first attempt
+      // before starting fallback.
       removeFiles(job);
 
       job.progress = 0;
       job.message =
         'High quality stream unavailable. Trying compatible MP4...';
 
+      // Attempt 2: progressive/single-file MP4
       const fallback = await runAttempt(
         fallbackAttempt,
         'FALLBACK MP4'
@@ -403,81 +411,6 @@ function startJob(job) {
     );
 
     removeFiles(job);
-  });
-}
-  child.on('close', async (code, signal) => {
-    job.process = null;
-
-    if (job.timeout) {
-      clearTimeout(job.timeout);
-      job.timeout = null;
-    }
-
-    console.log(
-      `[JOB ${job.id}] CLOSE code=${code} signal=${signal || 'none'}`
-    );
-
-    if (job.cleaned) return;
-
-    if (job.timedOut) {
-      removeFiles(job);
-      return;
-    }
-
-    if (code !== 0) {
-      job.status = 'error';
-      job.error =
-        'yt-dlp could not download this video.';
-      job.debug = output.slice(-4000);
-      job.message = 'Download failed.';
-      job.finishedAt = Date.now();
-
-      console.error(
-        `[JOB ${job.id}] DOWNLOAD FAILED`
-      );
-
-      console.error(
-        `[JOB ${job.id}] DEBUG: ${job.debug}`
-      );
-
-      removeFiles(job);
-      return;
-    }
-
-    try {
-      const stat = await fsp.stat(
-        job.filePath
-      );
-
-      if (!stat.size) {
-        throw new Error(
-          'Downloaded file is empty.'
-        );
-      }
-
-      job.size = stat.size;
-      job.status = 'done';
-      job.progress = 100;
-      job.message = 'Ready to download.';
-      job.finishedAt = Date.now();
-
-      console.log(
-        `[JOB ${job.id}] DONE size=${stat.size} bytes`
-      );
-
-    } catch (error) {
-      job.status = 'error';
-      job.error = error.message;
-      job.message = 'Download failed.';
-      job.finishedAt = Date.now();
-
-      console.error(
-        `[JOB ${job.id}] FILE ERROR:`,
-        error
-      );
-
-      removeFiles(job);
-    }
   });
 }
 
