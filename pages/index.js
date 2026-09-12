@@ -103,92 +103,28 @@ export default function Home({ allPosts }) {
     }
   };
 
-          const handleVideoDownload = async () => {
-    if (!result?.sourceUrl || downloadPreparing) return;
-
-    const downloaderApi =
-      process.env.NEXT_PUBLIC_DOWNLOADER_API;
-
-    if (!downloaderApi) {
-      setError('Downloader server is not configured.');
-      return;
-    }
+          const handleVideoDownload = () => {
+    if (!result?.videoUrl || downloadPreparing) return;
 
     setDownloadPreparing(true);
     setDownloadProgress(0);
     setError('');
 
     try {
-      const api = downloaderApi.replace(/\/+$/, '');
+      // Direct-download only: Vercel does not download or store the video.
+      // The API validates the Bilibili CDN URL and redirects the browser
+      // directly to Bilibili's video server.
+      const directUrl =
+        `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}`;
 
-      // Start download job on Render
-      const startResponse = await fetch(`${api}/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: result.sourceUrl,
-          title: result.title || 'Bilibili Video',
-        }),
-      });
-
-      const startData = await startResponse.json();
-
-      if (!startResponse.ok || !startData.success) {
-        throw new Error(
-          startData.error || 'Could not start download.'
-        );
-      }
-
-      const jobId = startData.jobId;
-
-      // Check download progress
-      while (true) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, 1500)
-        );
-
-        const statusResponse = await fetch(
-          `${api}/status?id=${encodeURIComponent(jobId)}`
-        );
-
-        const statusData = await statusResponse.json();
-
-        if (!statusResponse.ok || !statusData.success) {
-          throw new Error(
-            statusData.error || 'Could not check download status.'
-          );
-        }
-
-        setDownloadProgress(
-          Number(statusData.progress || 0)
-        );
-
-        if (statusData.status === 'done') {
-          // Render sends the finished MP4 as an attachment
-          window.location.href =
-            `${api}/file?id=${encodeURIComponent(jobId)}`;
-
-          break;
-        }
-
-        if (statusData.status === 'error') {
-          throw new Error(
-            statusData.error || 'Download failed.'
-          );
-        }
-      }
-
+      window.location.href = directUrl;
     } catch (err) {
       setError(
         err.message || 'Download failed. Please try again.'
       );
-    } finally {
       setDownloadPreparing(false);
     }
   };
-
 
 
 
@@ -577,6 +513,7 @@ export default function Home({ allPosts }) {
         </div>
       </section>
 
+    
       {/* SEO INFORMATION SECTION */}
       <section
         className="seo-info-section"
