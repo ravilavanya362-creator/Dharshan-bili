@@ -8,7 +8,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const videoUrl = decodeURIComponent(url);
+    // Next.js already gives us the decoded query value.
+    // Do NOT call decodeURIComponent again.
+    const videoUrl = url.trim();
 
     const parsed = new URL(videoUrl);
     const host = parsed.hostname.toLowerCase();
@@ -16,17 +18,25 @@ export default async function handler(req, res) {
     const allowed =
       host === 'bilibili.com' ||
       host.endsWith('.bilibili.com') ||
+      host === 'hdslb.com' ||
       host.endsWith('.hdslb.com') ||
+      host === 'bilivideo.com' ||
       host.endsWith('.bilivideo.com') ||
-      host.endsWith('.mcdn.bilivideo.cn');
+      host === 'bilivideo.cn' ||
+      host.endsWith('.bilivideo.cn');
 
     if (!allowed) {
+      console.error(
+        '[BiliSave] Blocked CDN host:',
+        host
+      );
+
       return res.status(400).json({
         error: 'Invalid Bilibili video URL.',
       });
     }
 
-    // Direct redirect:
+    // Direct download:
     // Vercel does NOT download or store the video.
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Location', videoUrl);
@@ -39,8 +49,8 @@ export default async function handler(req, res) {
       error?.message || error
     );
 
-    return res.status(500).json({
-      error: 'Unable to start the download.',
+    return res.status(400).json({
+      error: 'Invalid video URL.',
     });
   }
 }
