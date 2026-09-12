@@ -10,54 +10,51 @@ export default async function handler(req, res) {
   try {
     let targetUrl = url.trim();
 
-    // 1. b23.tv short link ni handle cheyadam
+    // 1. b23.tv షార్ట్ లింక్‌ని పర్ఫెక్ట్ గా రిసాల్వ్ చేయడానికి Native Fetch వాడుతున్నాం
     if (targetUrl.includes('b23.tv')) {
       try {
-        const redirectRes = await axios.get(targetUrl, {
-          maxRedirects: 5,
-          validateStatus: (status) => status >= 200 && status < 403,
+        const redirectResponse = await fetch(targetUrl, {
+          method: 'GET',
+          redirect: 'follow', // ఇది ఆటోమేటిక్‌గా ఫుల్ లింక్ కి తీసుకెళ్తుంది
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Referer': 'https://www.bilibili.com'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
           }
         });
-        targetUrl = redirectRes.request?.res?.responseUrl || redirectRes.config?.url || targetUrl;
+        targetUrl = redirectResponse.url; // ఇక్కడ మనకు ఫుల్ URL (BV ID తో సహా) వస్తుంది
       } catch (err) {
-        // Redirect fail ayina original URL vadukovachu
+        console.error('Redirect resolve error:', err);
       }
     }
 
-    // 2. BV id extract cheyadam
-    const bvidMatch = targetUrl.match(/BV[a-zA-Z0-9]+/);
+    // 2. ఫుల్ URL నుంచి BV ID ని ఎక్స్‌ట్రాక్ట్ చేయడం
+    const bvidMatch = targetUrl.match(/BV[a-zA-Z0-9]+/i);
     if (!bvidMatch) {
-      return res.status(400).json({ success: false, error: 'Could not find valid Bilibili ID from URL' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Could not find valid Bilibili ID from URL' 
+      });
     }
     const bvid = bvidMatch[0];
 
-    // 3. Bilibili View API call with proper headers
+    // 3. Bilibili View API (వీడియో డీటెయిల్స్ కోసం)
     const viewRes = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Referer': 'https://www.bilibili.com',
-        'Cookie': 'buvid3=infoc'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.bilibili.com'
       }
     });
 
     if (!viewRes.data || viewRes.data.code !== 0 || !viewRes.data.data) {
-      return res.status(404).json({ success: false, error: 'Video details not found or video is private/deleted.' });
+      return res.status(404).json({ success: false, error: 'Video details not found or private.' });
     }
 
-    const videoData = viewRes.data.data;
-    const cid = videoData.cid;
-    const title = videoData.title;
-    const thumbnail = videoData.pic;
+    const { cid, title, pic: thumbnail } = viewRes.data.data;
 
-    // 4. Playurl API call for direct MP4 stream
-    const playRes = await axios.get(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=64&fnval=0&fnver=0&fourk=0`, {
+    // 4. Play URL (వీడియో డౌన్‌లోడ్ లింక్ కోసం)
+    const playRes = await axios.get(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=64&fnval=1&fnver=0&fourk=0`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Referer': 'https://www.bilibili.com',
-        'Cookie': 'buvid3=infoc'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.bilibili.com'
       }
     });
 
