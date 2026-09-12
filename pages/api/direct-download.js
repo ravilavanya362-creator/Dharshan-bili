@@ -8,6 +8,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    const filename = `${encodeURIComponent(title || 'bilibili-video')}.mp4`;
+
     const response = await axios({
       method: 'GET',
       url: url,
@@ -20,6 +22,7 @@ export default async function handler(req, res) {
     });
 
     res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Access-Control-Allow-Origin', '*');
     
     if (response.headers['content-length']) {
@@ -40,3 +43,4 @@ export const config = {
     responseLimit: false,
   },
 };
+
