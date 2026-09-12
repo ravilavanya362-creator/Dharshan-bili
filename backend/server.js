@@ -10,9 +10,10 @@ const PORT = Number(process.env.PORT || 10000);
 
 const jobs = new Map();
 
-const MAX_JOBS = 2;
+const MAX_JOBS = 1;
 const JOB_TTL_MS = 30 * 60 * 1000;
 const STALE_MS = 90 * 60 * 1000;
+const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -52,8 +53,22 @@ function safeTitle(title) {
   return (cleaned || 'Bilibili Video').slice(0, 180);
 }
 
-function cleanupJob(job) {
+function removeFiles(job) {
+  if (!job || !job.filePath) return;
+
+  fsp.rm(job.filePath, { force: true }).catch(() => {});
+  fsp.rm(`${job.filePath}.part`, { force: true }).catch(() => {});
+}
+
+function cleanupJob(job, reason = 'cleanup') {
   if (!job) return;
+
+  console.log(`[JOB ${job.id}] cleanup: ${reason}`);
+
+  if (job.timeout) {
+    clearTimeout(job.timeout);
+    job.timeout = null;
+  }
 
   if (job.process && !job.process.killed) {
     try {
@@ -61,11 +76,7 @@ function cleanupJob(job) {
     } catch {}
   }
 
-  if (job.filePath) {
-    fsp.rm(job.filePath, { force: true }).catch(() => {});
-    fsp.rm(`${job.filePath}.part`, { force: true }).catch(() => {});
-  }
-
+  removeFiles(job);
   job.cleaned = true;
 }
 
@@ -84,9 +95,37 @@ function countActiveJobs() {
   return count;
 }
 
+function updateProgress(job, text) {
+  const matches = [
+    ...String(text).matchAll(/(\d+(?:\.\d+)?)%/g)
+  ];
+
+  if (matches.length) {
+    const value = Number(
+      matches[matches.length - 1][1]
+    );
+
+    if (Number.isFinite(value)) {
+      job.progress = Math.max(
+        0,
+        Math.min(100, value)
+      );
+    }
+  }
+
+  if (/Merging formats|Merging into/i.test(text)) {
+    job.message = 'Merging video and audio...';
+    job.progress = 100;
+  }
+}
+
 function startJob(job) {
   job.status = 'downloading';
   job.message = 'Downloading and merging video...';
+
+  console.log(`[JOB ${job.id}] START`);
+  console.log(`[JOB ${job.id}] URL: ${job.url}`);
+  console.log(`[JOB ${job.id}] Output: ${job.filePath}`);
 
   const args = [
     '--no-playlist',
@@ -98,7 +137,7 @@ function startJob(job) {
     '--socket-timeout',
     '30',
     '--concurrent-fragments',
-    '8',
+    '4',
     '--merge-output-format',
     'mp4',
     '-f',
@@ -118,43 +157,57 @@ function startJob(job) {
 
   job.process = child;
 
-  let stderr = '';
+  let output = '';
 
-  child.stdout.on('data', (chunk) => {
+  const recordOutput = (chunk) => {
     const text = chunk.toString();
 
-    const matches = [
-      ...text.matchAll(/(\d+(?:\.\d+)?)%/g)
-    ];
+    output += text;
 
-    if (matches.length) {
-      const value = Number(
-        matches[matches.length - 1][1]
+    if (output.length > 16000) {
+      output = output.slice(-16000);
+    }
+
+    updateProgress(job, text);
+
+    console.log(
+      `[JOB ${job.id}] ${text.trimEnd()}`
+    );
+  };
+
+  child.stdout.on('data', recordOutput);
+  child.stderr.on('data', recordOutput);
+
+  job.timeout = setTimeout(() => {
+    if (job.status === 'downloading') {
+      console.error(
+        `[JOB ${job.id}] TIMEOUT after 15 minutes`
       );
 
-      if (Number.isFinite(value)) {
-        job.progress = Math.max(
-          0,
-          Math.min(100, value)
-        );
+      job.status = 'error';
+      job.error =
+        'Download timed out. Please try again.';
+      job.message = 'Download timed out.';
+      job.finishedAt = Date.now();
+      job.timedOut = true;
+
+      if (
+        job.process &&
+        !job.process.killed
+      ) {
+        try {
+          job.process.kill('SIGTERM');
+        } catch {}
       }
     }
-
-    if (/Merging formats|Merging into/i.test(text)) {
-      job.message = 'Merging video and audio...';
-      job.progress = 100;
-    }
-  });
-
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
-
-    if (stderr.length > 12000) {
-      stderr = stderr.slice(-12000);
-    }
-  });
+  }, DOWNLOAD_TIMEOUT_MS);
 
   child.on('error', (error) => {
+    if (job.timeout) {
+      clearTimeout(job.timeout);
+      job.timeout = null;
+    }
+
     job.status = 'error';
 
     job.error =
@@ -165,37 +218,62 @@ function startJob(job) {
     job.message = 'Download failed.';
     job.finishedAt = Date.now();
 
-    cleanupJob(job);
+    console.error(
+      `[JOB ${job.id}] PROCESS ERROR:`,
+      error
+    );
+
+    removeFiles(job);
   });
 
-  child.on('close', async (code) => {
+  child.on('close', async (code, signal) => {
     job.process = null;
+
+    if (job.timeout) {
+      clearTimeout(job.timeout);
+      job.timeout = null;
+    }
+
+    console.log(
+      `[JOB ${job.id}] CLOSE code=${code} signal=${signal || 'none'}`
+    );
 
     if (job.cleaned) return;
 
+    if (job.timedOut) {
+      removeFiles(job);
+      return;
+    }
+
     if (code !== 0) {
       job.status = 'error';
-      job.error = 'yt-dlp could not download this video.';
-      job.debug = stderr.slice(-4000);
+      job.error =
+        'yt-dlp could not download this video.';
+      job.debug = output.slice(-4000);
       job.message = 'Download failed.';
       job.finishedAt = Date.now();
 
-      await fsp
-        .rm(job.filePath, { force: true })
-        .catch(() => {});
+      console.error(
+        `[JOB ${job.id}] DOWNLOAD FAILED`
+      );
 
-      await fsp
-        .rm(`${job.filePath}.part`, { force: true })
-        .catch(() => {});
+      console.error(
+        `[JOB ${job.id}] DEBUG: ${job.debug}`
+      );
 
+      removeFiles(job);
       return;
     }
 
     try {
-      const stat = await fsp.stat(job.filePath);
+      const stat = await fsp.stat(
+        job.filePath
+      );
 
       if (!stat.size) {
-        throw new Error('Downloaded file is empty.');
+        throw new Error(
+          'Downloaded file is empty.'
+        );
       }
 
       job.size = stat.size;
@@ -204,24 +282,38 @@ function startJob(job) {
       job.message = 'Ready to download.';
       job.finishedAt = Date.now();
 
+      console.log(
+        `[JOB ${job.id}] DONE size=${stat.size} bytes`
+      );
+
     } catch (error) {
       job.status = 'error';
       job.error = error.message;
       job.message = 'Download failed.';
       job.finishedAt = Date.now();
 
-      await fsp
-        .rm(job.filePath, { force: true })
-        .catch(() => {});
+      console.error(
+        `[JOB ${job.id}] FILE ERROR:`,
+        error
+      );
+
+      removeFiles(job);
     }
   });
 }
 
 async function handleStart(req, res) {
+  console.log('[HTTP] POST /start');
+
   if (countActiveJobs() >= MAX_JOBS) {
+    console.log(
+      '[HTTP] /start rejected: downloader busy'
+    );
+
     return json(res, 429, {
       success: false,
-      error: 'Downloader is busy. Please try again in a moment.'
+      error:
+        'Downloader is busy. Please try again in a moment.'
     });
   }
 
@@ -249,6 +341,10 @@ async function handleStart(req, res) {
 
   const title = safeTitle(data.title);
 
+  console.log(
+    `[HTTP] /start URL=${url}`
+  );
+
   if (!url) {
     return json(res, 400, {
       success: false,
@@ -259,7 +355,8 @@ async function handleStart(req, res) {
   if (!isBilibiliUrl(url)) {
     return json(res, 400, {
       success: false,
-      error: 'Only Bilibili URLs are supported.'
+      error:
+        'Only Bilibili URLs are supported.'
     });
   }
 
@@ -281,10 +378,19 @@ async function handleStart(req, res) {
     createdAt: Date.now(),
     finishedAt: null,
     process: null,
-    cleaned: false
+    timeout: null,
+    cleaned: false,
+    timedOut: false,
+    size: 0,
+    error: null,
+    debug: ''
   };
 
   jobs.set(id, job);
+
+  console.log(
+    `[JOB ${id}] QUEUED`
+  );
 
   startJob(job);
 
@@ -295,14 +401,20 @@ async function handleStart(req, res) {
 }
 
 function handleStatus(req, res, url) {
-  const id = url.searchParams.get('id');
+  const id =
+    url.searchParams.get('id');
 
   const job = jobs.get(id);
+
+  console.log(
+    `[HTTP] GET /status id=${id || 'missing'}`
+  );
 
   if (!job || job.cleaned) {
     return json(res, 404, {
       success: false,
-      error: 'Job not found or expired.'
+      error:
+        'Job not found or expired.'
     });
   }
 
@@ -310,7 +422,9 @@ function handleStatus(req, res, url) {
     success: true,
     jobId: job.id,
     status: job.status,
-    progress: Math.round(job.progress || 0),
+    progress: Math.round(
+      job.progress || 0
+    ),
     message: job.message,
     error:
       job.status === 'error'
@@ -320,32 +434,42 @@ function handleStatus(req, res, url) {
 }
 
 async function handleFile(req, res, url) {
-  const id = url.searchParams.get('id');
+  const id =
+    url.searchParams.get('id');
 
   const job = jobs.get(id);
+
+  console.log(
+    `[HTTP] GET /file id=${id || 'missing'}`
+  );
 
   if (!job || job.cleaned) {
     return json(res, 404, {
       success: false,
-      error: 'Job not found or expired.'
+      error:
+        'Job not found or expired.'
     });
   }
 
   if (job.status !== 'done') {
     return json(res, 409, {
       success: false,
-      error: 'Video is not ready yet.'
+      error:
+        'Video is not ready yet.'
     });
   }
 
   try {
-    const stat = await fsp.stat(job.filePath);
+    const stat = await fsp.stat(
+      job.filePath
+    );
 
-    const filename = safeTitle(job.title);
+    const filename =
+      safeTitle(job.title);
 
-    const encoded = encodeURIComponent(
-      filename
-    ).replace(/'/g, '%27');
+    const encoded =
+      encodeURIComponent(filename)
+        .replace(/'/g, '%27');
 
     cors(res);
 
@@ -371,41 +495,67 @@ async function handleFile(req, res, url) {
       'no-store'
     );
 
-    const stream = fs.createReadStream(
-      job.filePath
-    );
+    const stream =
+      fs.createReadStream(
+        job.filePath
+      );
 
     let completed = false;
 
-    stream.on('error', async () => {
-      if (!res.headersSent) {
-        json(res, 500, {
-          success: false,
-          error: 'Could not read downloaded file.'
-        });
-      }
+    stream.on(
+      'error',
+      async (error) => {
+        console.error(
+          `[JOB ${id}] FILE STREAM ERROR:`,
+          error
+        );
 
-      cleanupJob(job);
-      jobs.delete(id);
-    });
+        if (!res.headersSent) {
+          json(res, 500, {
+            success: false,
+            error:
+              'Could not read downloaded file.'
+          });
+        }
+
+        cleanupJob(
+          job,
+          'file stream error'
+        );
+
+        jobs.delete(id);
+      }
+    );
 
     stream.on('end', () => {
       completed = true;
+
+      console.log(
+        `[JOB ${id}] FILE SENT`
+      );
     });
 
-    stream.on('close', async () => {
-      await fsp
-        .rm(job.filePath, { force: true })
-        .catch(() => {});
+    stream.on(
+      'close',
+      async () => {
+        await fsp
+          .rm(job.filePath, {
+            force: true
+          })
+          .catch(() => {});
 
-      await fsp
-        .rm(`${job.filePath}.part`, { force: true })
-        .catch(() => {});
+        await fsp
+          .rm(
+            `${job.filePath}.part`,
+            { force: true }
+          )
+          .catch(() => {});
 
-      job.cleaned = true;
+        job.cleaned = true;
 
-      jobs.delete(id);
-    });
+        jobs.delete(id);
+      }
+    );
 
     res.on('close', () => {
       if (!completed) {
@@ -415,137 +565,180 @@ async function handleFile(req, res, url) {
 
     stream.pipe(res);
 
-  } catch {
+  } catch (error) {
+    console.error(
+      `[JOB ${id}] FILE NOT FOUND:`,
+      error
+    );
+
     return json(res, 404, {
       success: false,
-      error: 'Downloaded file has expired.'
+      error:
+        'Downloaded file has expired.'
     });
   }
 }
 
-const server = http.createServer(
-  async (req, res) => {
-    cors(res);
+const server =
+  http.createServer(
+    async (req, res) => {
+      cors(res);
 
-    if (req.method === 'OPTIONS') {
-      return res.end();
-    }
-
-    const url = new URL(
-      req.url,
-      `http://${req.headers.host || 'localhost'}`
-    );
-
-    try {
-      if (
-        req.method === 'GET' &&
-        (
-          url.pathname === '/' ||
-          url.pathname === '/health'
-        )
-      ) {
-        return json(res, 200, {
-          ok: true,
-          service: 'BiliSave downloader'
-        });
+      if (req.method === 'OPTIONS') {
+        return res.end();
       }
 
-      if (
-        req.method === 'POST' &&
-        url.pathname === '/start'
-      ) {
-        return handleStart(req, res);
-      }
+      const url = new URL(
+        req.url,
+        `http://${req.headers.host || 'localhost'}`
+      );
 
-      if (
-        req.method === 'GET' &&
-        url.pathname === '/status'
-      ) {
-        return handleStatus(
-          req,
-          res,
-          url
-        );
-      }
+      try {
+        if (
+          req.method === 'GET' &&
+          (
+            url.pathname === '/' ||
+            url.pathname === '/health'
+          )
+        ) {
+          return json(res, 200, {
+            ok: true,
+            service:
+              'BiliSave downloader'
+          });
+        }
 
-      if (
-        req.method === 'GET' &&
-        url.pathname === '/file'
-      ) {
-        return handleFile(
-          req,
-          res,
-          url
-        );
-      }
+        if (
+          req.method === 'POST' &&
+          url.pathname === '/start'
+        ) {
+          return handleStart(
+            req,
+            res
+          );
+        }
 
-      return json(res, 404, {
-        success: false,
-        error: 'Not found.'
-      });
+        if (
+          req.method === 'GET' &&
+          url.pathname === '/status'
+        ) {
+          return handleStatus(
+            req,
+            res,
+            url
+          );
+        }
 
-    } catch (error) {
-      console.error(error);
+        if (
+          req.method === 'GET' &&
+          url.pathname === '/file'
+        ) {
+          return handleFile(
+            req,
+            res,
+            url
+          );
+        }
 
-      if (!res.headersSent) {
-        json(res, 500, {
+        return json(res, 404, {
           success: false,
-          error: 'Internal downloader error.'
+          error: 'Not found.'
         });
+
+      } catch (error) {
+        console.error(
+          '[SERVER ERROR]',
+          error
+        );
+
+        if (!res.headersSent) {
+          json(res, 500, {
+            success: false,
+            error:
+              'Internal downloader error.'
+          });
+        }
       }
     }
-  }
-);
+  );
 
 server.requestTimeout = 0;
 server.timeout = 0;
 server.headersTimeout = 0;
 
-const cleanupTimer = setInterval(() => {
-  const now = Date.now();
+const cleanupTimer =
+  setInterval(() => {
+    const now = Date.now();
 
-  for (const [id, job] of jobs) {
-    const age = now - job.createdAt;
-
-    const doneAge = job.finishedAt
-      ? now - job.finishedAt
-      : 0;
-
-    if (
-      age > STALE_MS ||
-      (
-        job.status === 'done' &&
-        doneAge > JOB_TTL_MS
-      ) ||
-      (
-        job.status === 'error' &&
-        doneAge > JOB_TTL_MS
-      )
+    for (
+      const [id, job]
+      of jobs
     ) {
-      cleanupJob(job);
-      jobs.delete(id);
+      const age =
+        now - job.createdAt;
+
+      const doneAge =
+        job.finishedAt
+          ? now - job.finishedAt
+          : 0;
+
+      if (
+        age > STALE_MS ||
+        (
+          job.status === 'done' &&
+          doneAge > JOB_TTL_MS
+        ) ||
+        (
+          job.status === 'error' &&
+          doneAge > JOB_TTL_MS
+        )
+      ) {
+        cleanupJob(
+          job,
+          'expired'
+        );
+
+        jobs.delete(id);
+      }
     }
-  }
-}, 10 * 60 * 1000);
+  }, 10 * 60 * 1000);
 
 cleanupTimer.unref();
 
 function shutdown() {
-  for (const job of jobs.values()) {
-    cleanupJob(job);
+  console.log(
+    '[SERVER] shutting down'
+  );
+
+  for (
+    const job
+    of jobs.values()
+  ) {
+    cleanupJob(
+      job,
+      'server shutdown'
+    );
   }
 
   server.close(() => {
     process.exit(0);
   });
 
-  setTimeout(() => {
-    process.exit(0);
-  }, 5000).unref();
+  setTimeout(
+    () => process.exit(0),
+    5000
+  ).unref();
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on(
+  'SIGTERM',
+  shutdown
+);
+
+process.on(
+  'SIGINT',
+  shutdown
+);
 
 server.listen(
   PORT,
