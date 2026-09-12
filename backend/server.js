@@ -120,27 +120,95 @@ function updateProgress(job, text) {
 }
 
 function startJob(job) {
+function startJob(job) {
   job.status = 'downloading';
-  job.message = 'Downloading and merging video...';
+  job.message = 'Downloading video and audio...';
 
   console.log(`[JOB ${job.id}] START`);
   console.log(`[JOB ${job.id}] URL: ${job.url}`);
   console.log(`[JOB ${job.id}] Output: ${job.filePath}`);
 
-  const args = [
+  const runAttempt = (args, attemptName) => {
+    return new Promise((resolve) => {
+      console.log(
+        `[JOB ${job.id}] ${attemptName} START`
+      );
+
+      const child = spawn(
+        'yt-dlp',
+        args,
+        {
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      );
+
+      job.process = child;
+
+      let output = '';
+
+      const recordOutput = (chunk) => {
+        const text = chunk.toString();
+
+        output += text;
+
+        if (output.length > 16000) {
+          output = output.slice(-16000);
+        }
+
+        updateProgress(job, text);
+
+        console.log(
+          `[JOB ${job.id}] ${text.trimEnd()}`
+        );
+      };
+
+      child.stdout.on('data', recordOutput);
+      child.stderr.on('data', recordOutput);
+
+      child.on('error', (error) => {
+        job.process = null;
+
+        console.error(
+          `[JOB ${job.id}] ${attemptName} PROCESS ERROR:`,
+          error
+        );
+
+        resolve({
+          code: -1,
+          output
+        });
+      });
+
+      child.on('close', (code, signal) => {
+        job.process = null;
+
+        console.log(
+          `[JOB ${job.id}] ${attemptName} CLOSE code=${code} signal=${signal || 'none'}`
+        );
+
+        resolve({
+          code,
+          signal,
+          output
+        });
+      });
+    });
+  };
+
+  const firstAttempt = [
     '--no-playlist',
     '--newline',
     '--retries',
     '5',
     '--fragment-retries',
     '5',
-'--socket-timeout',
-'30',
-'--http-chunk-size',
-'5M',
-'--force-ipv4',
-'--concurrent-fragments',
-'4',
+    '--socket-timeout',
+    '30',
+    '--http-chunk-size',
+    '5M',
+    '--force-ipv4',
+    '--concurrent-fragments',
+    '4',
     '--merge-output-format',
     'mp4',
     '-f',
@@ -150,85 +218,193 @@ function startJob(job) {
     job.url
   ];
 
-  const child = spawn(
-    'yt-dlp',
-    args,
-    {
-      stdio: ['ignore', 'pipe', 'pipe']
-    }
-  );
+  const fallbackAttempt = [
+    '--no-playlist',
+    '--newline',
+    '--retries',
+    '8',
+    '--fragment-retries',
+    '8',
+    '--socket-timeout',
+    '30',
+    '--force-ipv4',
+    '--merge-output-format',
+    'mp4',
+    '-f',
+    'b[ext=mp4]/b',
+    '-o',
+    job.filePath,
+    job.url
+  ];
 
-  job.process = child;
+  const finishSuccess = async () => {
+    try {
+      const stat = await fsp.stat(job.filePath);
 
-  let output = '';
+      if (!stat.size) {
+        throw new Error(
+          'Downloaded file is empty.'
+        );
+      }
 
-  const recordOutput = (chunk) => {
-    const text = chunk.toString();
+      job.size = stat.size;
+      job.status = 'done';
+      job.progress = 100;
+      job.message = 'Ready to download.';
+      job.finishedAt = Date.now();
 
-    output += text;
-
-    if (output.length > 16000) {
-      output = output.slice(-16000);
-    }
-
-    updateProgress(job, text);
-
-    console.log(
-      `[JOB ${job.id}] ${text.trimEnd()}`
-    );
-  };
-
-  child.stdout.on('data', recordOutput);
-  child.stderr.on('data', recordOutput);
-
-  job.timeout = setTimeout(() => {
-    if (job.status === 'downloading') {
-      console.error(
-        `[JOB ${job.id}] TIMEOUT after 15 minutes`
+      console.log(
+        `[JOB ${job.id}] DONE size=${stat.size} bytes`
       );
 
+    } catch (error) {
       job.status = 'error';
-      job.error =
-        'Download timed out. Please try again.';
-      job.message = 'Download timed out.';
+      job.error = error.message;
+      job.message = 'Download failed.';
       job.finishedAt = Date.now();
-      job.timedOut = true;
 
-      if (
-        job.process &&
-        !job.process.killed
-      ) {
-        try {
-          job.process.kill('SIGTERM');
-        } catch {}
-      }
+      console.error(
+        `[JOB ${job.id}] FILE ERROR:`,
+        error
+      );
+
+      removeFiles(job);
     }
-  }, DOWNLOAD_TIMEOUT_MS);
+  };
 
-  child.on('error', (error) => {
+  const failJob = (output) => {
+    job.status = 'error';
+    job.error =
+      'yt-dlp could not download this video.';
+    job.debug = String(output || '').slice(-4000);
+    job.message = 'Download failed.';
+    job.finishedAt = Date.now();
+
+    console.error(
+      `[JOB ${job.id}] DOWNLOAD FAILED`
+    );
+
+    console.error(
+      `[JOB ${job.id}] DEBUG: ${job.debug}`
+    );
+
+    removeFiles(job);
+  };
+
+  const run = async () => {
+    const timeoutPromise = new Promise((resolve) => {
+      job.timeout = setTimeout(() => {
+        if (job.status === 'downloading') {
+          console.error(
+            `[JOB ${job.id}] TIMEOUT after 15 minutes`
+          );
+
+          job.status = 'error';
+          job.error =
+            'Download timed out. Please try again.';
+          job.message = 'Download timed out.';
+          job.finishedAt = Date.now();
+          job.timedOut = true;
+
+          if (
+            job.process &&
+            !job.process.killed
+          ) {
+            try {
+              job.process.kill('SIGTERM');
+            } catch {}
+          }
+
+          resolve('timeout');
+        }
+      }, DOWNLOAD_TIMEOUT_MS);
+    });
+
+    const downloadPromise = (async () => {
+      const first = await runAttempt(
+        firstAttempt,
+        'HIGH QUALITY'
+      );
+
+      if (first.code === 0) {
+        return 'success';
+      }
+
+      if (job.timedOut || job.cleaned) {
+        return 'stopped';
+      }
+
+      console.log(
+        `[JOB ${job.id}] HIGH QUALITY FAILED`
+      );
+
+      console.log(
+        `[JOB ${job.id}] Trying fallback MP4 format...`
+      );
+
+      removeFiles(job);
+
+      job.progress = 0;
+      job.message =
+        'High quality stream unavailable. Trying compatible MP4...';
+
+      const fallback = await runAttempt(
+        fallbackAttempt,
+        'FALLBACK MP4'
+      );
+
+      if (fallback.code === 0) {
+        return 'success';
+      }
+
+      if (job.timedOut || job.cleaned) {
+        return 'stopped';
+      }
+
+      failJob(
+        fallback.output || first.output
+      );
+
+      return 'failed';
+    })();
+
+    const result = await Promise.race([
+      downloadPromise,
+      timeoutPromise
+    ]);
+
     if (job.timeout) {
       clearTimeout(job.timeout);
       job.timeout = null;
     }
 
+    if (result === 'success') {
+      await finishSuccess();
+    }
+  };
+
+  run().catch((error) => {
+    if (job.timeout) {
+      clearTimeout(job.timeout);
+      job.timeout = null;
+    }
+
+    if (job.cleaned) return;
+
     job.status = 'error';
-
     job.error =
-      error.code === 'ENOENT'
-        ? 'yt-dlp is not installed on the downloader server.'
-        : error.message;
-
+      error.message || 'Download failed.';
     job.message = 'Download failed.';
     job.finishedAt = Date.now();
 
     console.error(
-      `[JOB ${job.id}] PROCESS ERROR:`,
+      `[JOB ${job.id}] UNEXPECTED ERROR:`,
       error
     );
 
     removeFiles(job);
   });
-
+}
   child.on('close', async (code, signal) => {
     job.process = null;
 
